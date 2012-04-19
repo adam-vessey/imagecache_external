@@ -194,6 +194,9 @@ function theme_imagecache_external_image($preset, $path, $alt = '', $title = '',
  *   An associative array containing:
  *   - path: A string containing the URL/path to the image to be rendered.
  *   - style_name: A string containing the name of an imagecache preset.
+ * @return string
+ *   Markup for the image.
+ * @ingroup themeable
  */
 function theme_imagecache_external($vars) {
   $params = array(
