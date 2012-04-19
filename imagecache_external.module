@@ -1,17 +1,19 @@
 <?php
-/*
- * @file imagecache_external.module
- * Allows imagecache to operate on external images
+/**
+ * @file
+ * Allows imagecache to operate on external images.
  * @copyright Copyright(c) 2010 Lee Rowlands
- * @license GPL v2 http://www.fsf.org/licensing/licenses/gpl.html 
+ * @license GPL v2 http://www.fsf.org/licensing/licenses/gpl.html
  * @author Lee Rowlands contact at rowlandsgroup dot com
- * 
  */
 
 /**
  * Implementation of hook_menu().
+ *
+ * Adds in paths to settings admin pages.
  */
-function imagecache_external_menu() { 
+function imagecache_external_menu() {
+  $items = array();
   // more complex menu item
   $items['admin/settings/imagecache_external'] = array(
     'title' => 'Imagecache External',
@@ -20,7 +22,7 @@ function imagecache_external_menu() {
     'page callback' => 'drupal_get_form',
     'page arguments' => array('imagecache_external_admin_form'),
     'access arguments' => array('Administer imagecache external'),
-    'type' => MENU_NORMAL_ITEM, 
+    'type' => MENU_NORMAL_ITEM,
   );
   $items['admin/settings/imagecache_external/settings'] = array(
     'title' => 'Settings',
@@ -29,7 +31,7 @@ function imagecache_external_menu() {
     'page callback' => 'drupal_get_form',
     'page arguments' => array('imagecache_external_admin_form'),
     'access arguments' => array('Administer imagecache external'),
-    'type' => MENU_DEFAULT_LOCAL_TASK, 
+    'type' => MENU_DEFAULT_LOCAL_TASK,
   );
   $items['admin/settings/imagecache_external/flush'] = array(
     'title' => 'Flush external images',
@@ -38,7 +40,7 @@ function imagecache_external_menu() {
     'page callback' => 'drupal_get_form',
     'page arguments' => array('imagecache_external_flush_form'),
     'access arguments' => array('Administer imagecache external'),
-    'type' => MENU_LOCAL_TASK, 
+    'type' => MENU_LOCAL_TASK,
   );
 
   return $items;
@@ -52,39 +54,70 @@ function imagecache_external_perm() {
 }
 
 /**
- * Util to generate a path to an image
- * @param $url string the url to the image
- * @param $preset imagecache preset
- * @return string the url to the image
-*/
+ * Util to generate a path to an image.
+ *
+ * @deprecated
+ *   Probably easier to use either the theme implementation, or use the called
+ *   function (_imagecache_external_generate_path) directly.  All this
+ *   function does is pass the return through url().
+ *
+ * @param $url string
+ *   the url to the image
+ * @param $preset string
+ *   name of imagecache preset
+ * @return string
+ *   the url to the image, relative to host (starts with '/')
+ */
 function imagecache_external_generate_path($url, $preset) {
-  $hash = md5($url);
+  return url(_imagecache_external_generate_path($url, $preset, $use_default));
+}
+
+/**
+ * API function to actually generate a path to an image.
+ *
+ * @param $url string
+ *   the url to the image
+ * @param $preset string
+ *   imagecache preset name
+ * @return string
+ *   the url to the image, relative to the Drupal base path.
+ */
+function _imagecache_external_generate_path($url, $preset) {
   $dir = file_create_path('externals');
   if (!file_check_directory($dir)) {
     mkdir($dir, 0775, FALSE);
   }
   $hash = md5($url);
   $cachepath = file_create_path('externals/'. $hash);
-  if (!is_file($cachepath)) {
-    $result = imagecache_external_fetch($url, $cachepath);
+  if (!is_file($cachepath)) { //if it's not already downloaded...
+    $result = _imagecache_external_fetch($url, $cachepath); //Download it.
     if (!$result) {
       //we couldn't get the file
-      return drupal_not_found();
+      return FALSE;
     }
   }
   //we now have the file, return url relative to the imagecache preset
-  return url(file_directory_path() .'/imagecache/'. $preset .'/externals/'. $hash);
+  return file_directory_path() .'/imagecache/'. $preset .'/externals/'. $hash;
 }
 
 /**
- * Api function to fetch a url
- * @param $url string url to fetch
-*/
-function imagecache_external_fetch($url, $cachepath) {
+ * API function to fetch a url
+ *
+ * @param $original_url string
+ *   url to fetch
+ * @return boolean
+ *   whether the image was properly fetched.
+ */
+function _imagecache_external_fetch($original_url, $cachepath) {
   //now we test it against the whitelist/blacklist
-  if (!$url) {
-    return drupal_not_found();
+  if (!$original_url) {
+    watchdog('imagecache_external', 'No url provided!?');
+    return FALSE;
   }
+
+  //Resolve relative URLs...
+  $url = url($original_url, array('absolute' => TRUE));
+
   //extract hostname from url
   $parsed_url = parse_url($url);
   $host = $parsed_url['host'];
@@ -95,31 +128,90 @@ function imagecache_external_fetch($url, $cachepath) {
   // the list is set as a whitelist and the host is not found in the list.
   // Note that this is retrospective, ie a previously downloaded image can be blocked
   if (((variable_get('imagecache_external_option', 'white') == 'black' &&
-       in_array($host, $list)) ||
-      (variable_get('imagecache_external_option', 'white') == 'white' &&
-       !in_array($host, $list))) &&
-      !user_access('Bypass black/white list')) {
+    in_array($host, $list)) ||
+    (variable_get('imagecache_external_option', 'white') == 'white' &&
+    !in_array($host, $list))) &&
+    !user_access('Bypass black/white list')) {
     //if we are unsuccessful then log a message in watchdog
-    watchdog('imagecache_external', 'The image '. $url .' could not be retrieved, it did not meet the black/white list requirements.');
-    return drupal_access_denied();
+    watchdog('imagecache_external', 'The image %url could not be retrieved, it did not meet the black/white list requirements.', array('%url' => $original_url));
+    return FALSE;
   }
-  if (!user_access('Fetch external images')) {
-    watchdog('imagecache_external', 'The image '. $url .' could not be retrieved, the user does not have permission to fetch external images.');
-    return drupal_access_denied();
+  elseif (!user_access('Fetch external images')) {
+    watchdog('imagecache_external', 'The image %url could not be retrieved, the user does not have permission to fetch external images.', array('%url' => $original_url));
+    return FALSE;
   }
+
   $result = drupal_http_request($url);
   $code   = floor($result->code / 100) * 100;
   $types  = array('image/jpeg', 'image/png', 'image/gif');
-  if ($result->data && $code != 400 && $code != 500 && in_array($result->Content-Type, $types)) {
+  if ($result->data && $code == 200 && in_array($result->headers['Content-Type'], $types)) {
     $src = file_save_data($result->data, $cachepath);
   }
   else  {
     //if we are unsuccessful then log a message in watchdog
-    watchdog('imagecache_external', 'The image '. $url .' could not be retrieved');
-    return drupal_not_found();
+    watchdog('imagecache_external', 'The image %url could not be retrieved.', array('%url' => $original_url));
+    return FALSE;
   }
   return TRUE;
 }
 
+/**
+ * Theme implementation for imagecache_external_image.
+ *
+ * Wraps the stock theme('image', ...), using imagecache along the way.
+ *
+ * @param $preset string
+ *   The imagecache preset to be used.
+ * @param $path string
+ *   Path to the image to serve.
+ * @param $alt string
+ *   Image alt-text
+ * @param $title string
+ *   Image tooltip text
+ * @param $attributes array
+ *   An array of attributes to add to the img element
+ * @return string
+ *   Markup for the image.
+ * @ingroup themeable
+ */
+function theme_imagecache_external_image($preset, $path, $alt = '', $title = '', $attributes = array()) {
+  $image = _imagecache_external_generate_path($path, $preset);
+  if ($image) {
+    return theme('image', $image, $alt, $title, $attributes, FALSE);
+  }
+  else {
+    watchdog('imagecache_external', 'Unable to load image %url with preset %preset.', array('%url' => $path, '%preset' => $preset));
+  }
+}
 
+/**
+ * Theme implementation for imagecache_external.
+ *
+ * Wraps imagecache_external_image to offer a usage style similar to the D7
+ * implementation.
+ *
+ * @param $vars array
+ *   An associative array containing:
+ *   - path: A string containing the URL/path to the image to be rendered.
+ *   - style_name: A string containing the name of an imagecache preset.
+ */
+function theme_imagecache_external($vars) {
+  $params = array(
+    'path' => '',
+    'style_name' => '',
+  );
 
+  if (count($to_use = array_intersect_key($vars, $params)) == count($params)) {
+    return theme_imagecache_external_image($to_use['style_name'], $to_use['path']);
+  }
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function imagecache_external_theme() {
+  return array(
+    'imagecache_external_image' => array(), //More like theme_image...
+    'imagecache_external' => array(), //Similar to D7 usage...
+  );
+}
