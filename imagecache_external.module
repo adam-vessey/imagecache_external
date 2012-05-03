@@ -118,27 +118,8 @@ function _imagecache_external_fetch($original_url, $cachepath) {
   //Resolve relative URLs...
   $url = url($original_url, array('absolute' => TRUE));
 
-  //extract hostname from url
-  $parsed_url = parse_url($url);
-  $host = $parsed_url['host'];
-
-  $list = preg_split('/\s+/', variable_get('imagecache_external_hosts', ''));
-
-  // Check if the list is set as a blacklist and the host is in the list or if
-  // the list is set as a whitelist and the host is not found in the list.
-  // Note that this is retrospective, ie a previously downloaded image can be blocked
-  if (((variable_get('imagecache_external_option', 'white') == 'black' &&
-    in_array($host, $list)) ||
-    (variable_get('imagecache_external_option', 'white') == 'white' &&
-    !in_array($host, $list))) &&
-    !user_access('Bypass black/white list')) {
-    //if we are unsuccessful then log a message in watchdog
-    watchdog('imagecache_external', 'The image %url could not be retrieved, it did not meet the black/white list requirements.', array('%url' => $original_url));
-    return FALSE;
-  }
-  elseif (!user_access('Fetch external images')) {
-    watchdog('imagecache_external', 'The image %url could not be retrieved, the user does not have permission to fetch external images.', array('%url' => $original_url));
-    return FALSE;
+  if (!($can_fetch = imagecache_external_can_fetch($url, TRUE))) {
+    return $can_fetch;
   }
 
   $result = drupal_http_request($url);
@@ -217,4 +198,55 @@ function imagecache_external_theme() {
     'imagecache_external_image' => array(), //More like theme_image...
     'imagecache_external' => array(), //Similar to D7 usage...
   );
+}
+
+/**
+ * Determine whether or not an image can be fetched by the current user.
+ *
+ * @param $url string
+ *   A string containing the URL to the image we want to check.
+ * @param $log boolean
+ *   A boolean which indicates whether or not we should write to the watchdog
+ *   log on failure. (Default: FALSE).
+ * @return boolean
+ *   Whether or not the current user can fetch from the given host.
+ */
+function imagecache_external_can_fetch($url, $log = FALSE) {
+  //Build the white/black list.
+  $list = preg_split('/\s+/', variable_get('imagecache_external_hosts', ''));
+  
+  $url = url($url, array('absolute' => TRUE));
+  
+  //Ensure we can open things obtained through Drupal menu callbacks...
+  global $base_url;
+  $parsed_base = parse_url($base_url);
+  $list[] = $parsed_base['host'];
+
+  //Extract the host from the image's URL.
+  $parsed_url = parse_url($url);
+  $host = $parsed_url['host'];
+  
+  // Check if the list is set as a blacklist and the host is in the list or if
+  // the list is set as a whitelist and the host is not found in the list.
+  // Note that this is retrospective, ie a previously downloaded image can be blocked
+  if (((variable_get('imagecache_external_option', 'white') == 'black' &&
+    in_array($host, $list)) ||
+    (variable_get('imagecache_external_option', 'white') == 'white' &&
+    !in_array($host, $list))) &&
+    !user_access('Bypass black/white list')) {
+    //if we are unsuccessful then log a message in watchdog
+    if ($log) {
+      watchdog('imagecache_external', 'The image %url could not be retrieved, it did not meet the black/white list requirements.', array('%url' => $original_url), WATCHDOG_WARNING);
+    }
+    return FALSE;
+  }
+  elseif (!user_access('Fetch external images')) {
+    if ($log) {
+      watchdog('imagecache_external', 'The image %url could not be retrieved, the user does not have permission to fetch external images.', array('%url' => $original_url), WATCHDOG_WARNING);
+    }
+    return FALSE;
+  }
+  else { //Should be good!
+    return TRUE;
+  }
 }
