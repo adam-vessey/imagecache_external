@@ -122,15 +122,22 @@ function _imagecache_external_fetch($original_url, $cachepath) {
     return $can_fetch;
   }
 
-  $result = drupal_http_request($url);
-  $code   = floor($result->code / 100) * 100;
+
   $types  = array('image/jpeg', 'image/png', 'image/gif');
+  $result = drupal_http_request($url, array(
+    'Accept' => implode(', ', $types),
+  ));
+  $code   = floor($result->code / 100) * 100;
   if ($result->data && $code == 200 && in_array($result->headers['Content-Type'], $types)) {
     $src = file_save_data($result->data, $cachepath);
   }
   else  {
     //if we are unsuccessful then log a message in watchdog
-    watchdog('imagecache_external', 'The image %url could not be retrieved.', array('%url' => $original_url));
+    watchdog('imagecache_external', 'The image %url could not be retrieved. Code: @code Headers: "@headers" Content: "@asdf"', array(
+      '%url' => $original_url,
+      '@code' => $result->code,
+      '@headers' => print_r($result->headers, TRUE),
+    ));
     return FALSE;
   }
   return TRUE;
